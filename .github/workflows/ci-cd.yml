@@ -86,6 +86,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run OWASP Dependency Check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           OWASP_VERSION="9.2.0"
           if [ ! -f "/opt/dependency-check/bin/dependency-check.sh" ]; then
@@ -99,7 +101,9 @@ jobs:
             --project "ProductAPI" \
             --scan "src/" \
             --format "HTML" \
+            --format "JSON" \
             --out "owasp-reports/" \
+            --nvdApiKey "${NVD_API_KEY}" \
             --failOnCVSS 9 \
             --enableRetired || true
 
