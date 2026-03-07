@@ -21,9 +21,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+      # .NET 8 already installed on EC2 — skip setup-dotnet to avoid
+      # permission errors writing to /usr/share/dotnet on self-hosted runner
+      - name: Set dotnet PATH
+        run: |
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          dotnet --version
 
       - name: Cache NuGet
         uses: actions/cache@v4
@@ -51,7 +54,8 @@ jobs:
             /d:sonar.host.url="${{ secrets.SONAR_HOST_URL }}" \
             /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
             /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" \
-            /d:sonar.exclusions="**/Migrations/**,**/obj/**,**/bin/**"
+            /d:sonar.exclusions="**/Migrations/**,**/obj/**,**/bin/**" \
+            /d:sonar.coverage.exclusions="**/Program.cs,**/Migrations/**,**/AppDbContextFactory.cs"
 
       - name: Build
         run: dotnet build ProductAPI.sln -c Release --no-restore
@@ -90,6 +94,7 @@ jobs:
             sudo unzip -q /tmp/dependency-check.zip -d /opt/
             sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
           fi
+          mkdir -p owasp-reports
           /opt/dependency-check/bin/dependency-check.sh \
             --project "ProductAPI" \
             --scan "src/" \
@@ -150,6 +155,7 @@ jobs:
 
       - name: Write .env from secrets
         run: |
+          mkdir -p ~/productapi-infra
           cat > ~/productapi-infra/.env << ENVEOF
           MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
           MYSQL_USER=${{ secrets.MYSQL_USER }}

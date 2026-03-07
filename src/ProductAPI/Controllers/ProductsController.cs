@@ -25,6 +25,7 @@ public class ProductsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10)
     {
+        _logger.LogInformation("Fetching products page={Page} size={Size}", page, pageSize);
         var query = _context.Products.AsQueryable();
         if (isActive.HasValue)
             query = query.Where(p => p.IsActive == isActive.Value);
@@ -38,7 +39,10 @@ public class ProductsController : ControllerBase
     {
         var product = await _context.Products.FindAsync(id);
         if (product == null)
+        {
+            _logger.LogWarning("Product {Id} not found", id);
             return NotFound(new { message = $"Product with ID {id} not found" });
+        }
         return Ok(product);
     }
 
@@ -51,6 +55,7 @@ public class ProductsController : ControllerBase
         product.UpdatedAt = DateTime.UtcNow;
         _context.Products.Add(product);
         await _context.SaveChangesAsync();
+        _logger.LogInformation("Created product {Id}: {Name}", product.Id, product.Name);
         return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
     }
 
@@ -69,6 +74,7 @@ public class ProductsController : ControllerBase
         existing.IsActive = product.IsActive;
         existing.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+        _logger.LogInformation("Updated product {Id}", id);
         return NoContent();
     }
 
@@ -80,6 +86,7 @@ public class ProductsController : ControllerBase
             return NotFound(new { message = $"Product with ID {id} not found" });
         _context.Products.Remove(product);
         await _context.SaveChangesAsync();
+        _logger.LogInformation("Deleted product {Id}", id);
         return NoContent();
     }
 

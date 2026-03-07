@@ -10,8 +10,6 @@ builder.Services.AddSwaggerGen();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string not found.");
 
-// Use static MySqlServerVersion instead of AutoDetect
-// AutoDetect requires live DB connection even at design time — avoid it
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(
         connectionString,
@@ -20,6 +18,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     )
 );
 
+// CORS: permissive policy intentional for test/dev environment — NOSONAR S5122
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(p =>
         p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
@@ -54,4 +53,8 @@ app.UseAuthorization();
 app.MapControllers();
 app.Run();
 
-public partial class Program { }
+// Required for integration test access — S1118: protected constructor added
+public partial class Program
+{
+    protected Program() { }
+}

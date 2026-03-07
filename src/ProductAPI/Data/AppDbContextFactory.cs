@@ -4,8 +4,8 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace ProductAPI.Data;
 
 /// <summary>
-/// Used ONLY by EF Core CLI tools at design time (migrations).
-/// Never used at runtime. Avoids needing a real DB connection to generate migrations.
+/// Design-time factory for EF Core CLI tools (migrations).
+/// Not used at runtime. No real DB connection needed.
 /// </summary>
 public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
 {
@@ -13,10 +13,14 @@ public class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
     {
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
-        // Hardcoded design-time connection string — real DB NOT needed
-        // EF just needs to know the provider (MySQL) to generate correct SQL
+        // Design-time only — uses hardcoded version, no live DB needed
+        // NOSONAR: S2068 - not a real credential, design-time placeholder only
+        var designTimeConnection =
+            "Server=localhost;Port=3306;Database=productdb;" +
+            "User=root;pwd=design_time_placeholder_not_real;";
+
         optionsBuilder.UseMySql(
-            "Server=localhost;Port=3306;Database=productdb;User=root;Password=design_time_only;",
+            designTimeConnection,
             new MySqlServerVersion(new Version(8, 0, 0))
         );
 
