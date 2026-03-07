@@ -1,0 +1,177 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  IMAGE_NAME: productapi
+  SONAR_PROJECT_KEY: 'ProductAPI'
+
+jobs:
+
+  code-analysis:
+    name: Build + Test + SonarQube
+    runs-on: [self-hosted, Linux, X64, ec2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Restore
+        run: dotnet restore ProductAPI.sln
+
+      - name: Install SonarScanner and Coverage tools
+        run: |
+          dotnet tool install --global dotnet-sonarscanner 2>/dev/null || true
+          dotnet tool install --global dotnet-coverage 2>/dev/null || true
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: SonarQube Begin
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          dotnet sonarscanner begin \
+            /k:"${{ env.SONAR_PROJECT_KEY }}" \
+            /d:sonar.host.url="${{ secrets.SONAR_HOST_URL }}" \
+            /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
+            /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" \
+            /d:sonar.exclusions="**/Migrations/**,**/obj/**,**/bin/**"
+
+      - name: Build
+        run: dotnet build ProductAPI.sln -c Release --no-restore
+
+      - name: Test with Coverage
+        run: |
+          dotnet-coverage collect \
+            "dotnet test tests/ProductAPI.Tests/ProductAPI.Tests.csproj \
+              --no-build -c Release \
+              --logger trx --results-directory TestResults" \
+            -f xml -o coverage.xml
+
+      - name: SonarQube End
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults/
+
+  owasp-scan:
+    name: OWASP Dependency Check
+    runs-on: [self-hosted, Linux, X64, ec2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OWASP Dependency Check
+        run: |
+          OWASP_VERSION="9.2.0"
+          if [ ! -f "/opt/dependency-check/bin/dependency-check.sh" ]; then
+            wget -q "https://github.com/jeremylong/DependencyCheck/releases/download/v${OWASP_VERSION}/dependency-check-${OWASP_VERSION}-release.zip" \
+              -O /tmp/dependency-check.zip
+            sudo unzip -q /tmp/dependency-check.zip -d /opt/
+            sudo chmod +x /opt/dependency-check/bin/dependency-check.sh
+          fi
+          /opt/dependency-check/bin/dependency-check.sh \
+            --project "ProductAPI" \
+            --scan "src/" \
+            --format "HTML" \
+            --out "owasp-reports/" \
+            --failOnCVSS 9 \
+            --enableRetired || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owasp-report
+          path: owasp-reports/
+
+  docker-build-scan:
+    name: Docker Build + Trivy Scan
+    runs-on: [self-hosted, Linux, X64, ec2]
+    needs: [code-analysis]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            --tag ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --tag ${{ env.IMAGE_NAME }}:latest \
+            --file Dockerfile .
+
+      - name: Trivy Vulnerability Scan
+        run: |
+          trivy image \
+            --exit-code 0 \
+            --severity HIGH,CRITICAL \
+            --format table \
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Trivy SARIF Report
+        run: |
+          trivy image \
+            --exit-code 0 \
+            --format sarif \
+            --output trivy-results.sarif \
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-report
+          path: trivy-results.sarif
+
+  deploy:
+    name: Deploy to EC2 Docker
+    runs-on: [self-hosted, Linux, X64, ec2]
+    needs: [docker-build-scan, owasp-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env from secrets
+        run: |
+          cat > ~/productapi-infra/.env << ENVEOF
+          MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_USER=${{ secrets.MYSQL_USER }}
+          MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+          ENVEOF
+          chmod 600 ~/productapi-infra/.env
+
+      - name: Copy docker-compose to infra folder
+        run: cp docker-compose.yml ~/productapi-infra/docker-compose.yml
+
+      - name: Deploy productapi container
+        run: |
+          cd ~/productapi-infra
+          docker-compose up -d --no-deps --force-recreate productapi
+
+      - name: Health Check
+        run: |
+          sleep 30
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/health)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Health check failed with HTTP $HTTP_CODE"
+            docker logs productapi-app --tail 50
+            exit 1
+          fi
+          echo "Deployment successful! HTTP $HTTP_CODE"

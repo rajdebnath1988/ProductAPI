@@ -1,0 +1,13 @@
+[Oo]bj/
+[Bb]in/
+out/
+.vs/
+*.user
+TestResults/
+coverage.xml
+*.trx
+.env
+!.env.example
+.DS_Store
+.idea/
+.vscode/
