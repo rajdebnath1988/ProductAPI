@@ -64,7 +64,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
-      - ConnectionStrings__DefaultConnection=Server=mysql;Port=3306;Database=productdb;User=appuser;Password=change_me_app;AllowPublicKeyRetrieval=true;SslMode=None;
+      - ConnectionStrings__DefaultConnection=Server=productapi-mysql;Port=3306;Database=productdb;User=appuser;Password=AppPass@2026;AllowPublicKeyRetrieval=true;SslMode=None;
+      
     ports:
       - "80:8080"
     networks:
